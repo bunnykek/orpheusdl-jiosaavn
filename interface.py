@@ -13,7 +13,7 @@ def cleanhtml(raw_html):
 
 module_information = ModuleInformation( # Only service_name and module_supported_modes are mandatory
     service_name = 'Jiosaavn',
-    module_supported_modes = ModuleModes.download | ModuleModes.lyrics | ModuleModes.covers | ModuleModes.credits,
+    module_supported_modes = ModuleModes.download | ModuleModes.lyrics | ModuleModes.covers | ModuleModes.credits | ModuleModes.playlist,
     flags = ModuleFlags.hidden,
     global_settings = {},
     global_storage_variables = [],
@@ -26,6 +26,7 @@ module_information = ModuleInformation( # Only service_name and module_supported
         'song': DownloadTypeEnum.track,
         'album': DownloadTypeEnum.album,
         'playlist': DownloadTypeEnum.playlist,
+        'featured': DownloadTypeEnum.playlist,
         'artist': DownloadTypeEnum.artist
     }, # How this works: if '/track/' is detected in the URL, then track downloading is triggered
     login_behaviour = ManualEnum.manual, # setting to ManualEnum.manual disables Orpheus automatically calling login() when needed
@@ -51,8 +52,9 @@ class ModuleInterface:
         self.song_api = "https://www.jiosaavn.com/api.php?__call=webapi.get&token={}&type=song&_format=json"
         self.album_api = "https://www.jiosaavn.com/api.php?__call=webapi.get&token={}&type=album&_format=json"
         self.playlist_api = "https://www.jiosaavn.com/api.php?__call=webapi.get&token={}&type=playlist&_format=json"
+        self.artist_api = "https://www.jiosaavn.com/api.php?__call=webapi.get&token={}&type=artist&p={}&n_song=50&n_album=50&sub_type=albums&more=true&category=latest&&sort_order=&includeMetaTags=0&ctx=web6dot0&api_version=4&_format=json&_marker=0"
         self.lyrics_api = "https://www.jiosaavn.com/api.php?__call=lyrics.getLyrics&ctx=web6dot0&api_version=4&_format=json&_marker=0%3F_marker%3D0&lyrics_id="
-        self.album_song_rx = re.compile(r"https://www\.jiosaavn\.com/(album|song)/.+?/(.+)")
+        self.artist_album_song_rx = re.compile(r"https://www\.jiosaavn\.com/(artist|album|song)/.+?/(.+)")
         self.playlist_rx = re.compile(r"https://www\.jiosaavn\.com/s/playlist/.+/(.+)")
 
 
@@ -67,7 +69,7 @@ class ModuleInterface:
         return PlaylistInfo(
             name = playlist_data['listname'],
             creator = '',
-            tracks = [self.album_song_rx.search(song['perma_url']).group(2) for song in playlist_data['songs']],
+            tracks = [self.artist_album_song_rx.search(song['perma_url']).group(2) for song in playlist_data['songs']],
             release_year = '',
             explicit = False,
             creator_id = '', # optional
@@ -76,7 +78,7 @@ class ModuleInterface:
             animated_cover_url = '', # optional
             description = '', # optional
             track_extra_kwargs = {
-                'data':{self.album_song_rx.search(song['perma_url']).group(2): song for song in playlist_data['songs']}
+                'data':{self.artist_album_song_rx.search(song['perma_url']).group(2): song for song in playlist_data['songs']}
             } # optional, whatever you want
         )
     
@@ -89,16 +91,16 @@ class ModuleInterface:
     def get_album_info(self, album_id: str, data={}) -> Optional[AlbumInfo]: # Mandatory if ModuleModes.download
         album_data = data[album_id] if album_id in data else self.get_album_json(album_id)
 
-        track_extra_kwargs = {'data' : {self.album_song_rx.search(song['perma_url']).group(2): song for song in album_data['songs']} }
+        track_extra_kwargs = {'data' : {self.artist_album_song_rx.search(song['perma_url']).group(2): song for song in album_data['songs']} }
         track_extra_kwargs['data']['album_artist']=html.unescape(album_data['primary_artists']),
         track_extra_kwargs['data']['total_tracks']=len(album_data['songs']),
-        track_extra_kwargs['data']['track_no'] = {self.album_song_rx.search(song['perma_url']).group(2): i+1 for i, song in enumerate(album_data['songs'])},
+        track_extra_kwargs['data']['track_no'] = {self.artist_album_song_rx.search(song['perma_url']).group(2): i+1 for i, song in enumerate(album_data['songs'])},
         
 
         return AlbumInfo(
             name = html.unescape(album_data['name']),
             artist = html.unescape(album_data['primary_artists']),
-            tracks = [self.album_song_rx.search(song['perma_url']).group(2) for song in album_data['songs']],
+            tracks = [self.artist_album_song_rx.search(song['perma_url']).group(2) for song in album_data['songs']],
             release_year = album_data['year'],
             explicit = '',
             artist_id = album_data['primary_artists_id'], # optional
@@ -210,11 +212,17 @@ class ModuleInterface:
 
     def get_artist_info(self, artist_id: str, get_credited_albums: bool) -> ArtistInfo: # Mandatory if ModuleModes.download
         # get_credited_albums means stuff like remix compilations the artist was part of
-        artist_data = self.session.get_artist(artist_id)
+        albums_id = []
+        artist_name = self.session.get(self.artist_api.format(artist_id, 0)).json()['name']
+        for i in range(10): 
+            response = self.session.get(self.artist_api.format(artist_id, i)).json()
+            if len(response['topAlbums'])==0:
+                break
+            albums_id.extend([self.artist_album_song_rx.search(album['perma_url']).group(2) for album in response['topAlbums']])
 
         return ArtistInfo(
-            name = '',
-            albums = [], # optional
+            name = artist_name,
+            albums = albums_id, # optional
             album_extra_kwargs = {'data': ''}, # optional, whatever you want
             tracks = [], # optional
             track_extra_kwargs = {'data': ''} # optional, whatever you want
@@ -248,7 +256,7 @@ class ModuleInterface:
 
         if query_type in [DownloadTypeEnum.track, DownloadTypeEnum.album]:
             return [SearchResult(
-                    result_id = self.album_song_rx.search(i['perma_url']).group(2),
+                    result_id = self.artist_album_song_rx.search(i['perma_url']).group(2),
                     name = i['title'], # optional only if a lyrics/covers only module
                     artists = i['subtitle'].split(', '), # optional only if a lyrics/covers only module or an artist search
                     year = i['year'], # optional
@@ -259,4 +267,3 @@ class ModuleInterface:
                     result_id = i['perma_url'].split('/')[-1],
                     name = i['title'], # optional only if a lyrics/covers only module
                 ) for i in results]
-
