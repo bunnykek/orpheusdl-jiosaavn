@@ -25,7 +25,7 @@ module_information = ModuleInformation( # Only service_name and module_supported
     url_constants = { # This is the default if no url_constants is given. Unused if custom_url_parsing is flagged
         'song': DownloadTypeEnum.track,
         'album': DownloadTypeEnum.album,
-        'playlist': DownloadTypeEnum.playlist,
+        'featured': DownloadTypeEnum.playlist,
         'artist': DownloadTypeEnum.artist
     }, # How this works: if '/track/' is detected in the URL, then track downloading is triggered
     login_behaviour = ManualEnum.manual, # setting to ManualEnum.manual disables Orpheus automatically calling login() when needed
@@ -53,7 +53,7 @@ class ModuleInterface:
         self.playlist_api = "https://www.jiosaavn.com/api.php?__call=webapi.get&token={}&type=playlist&_format=json"
         self.lyrics_api = "https://www.jiosaavn.com/api.php?__call=lyrics.getLyrics&ctx=web6dot0&api_version=4&_format=json&_marker=0%3F_marker%3D0&lyrics_id="
         self.album_song_rx = re.compile(r"https://www\.jiosaavn\.com/(album|song)/.+?/(.+)")
-        self.playlist_rx = re.compile(r"https://www\.jiosaavn\.com/s/playlist/.+/(.+)")
+        self.playlist_rx = re.compile(r"https://www\.jiosaavn\.com/featured/.+/(.+)")
 
 
 
